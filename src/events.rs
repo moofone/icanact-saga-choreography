@@ -1,59 +1,112 @@
 //! Saga events
 
-use serde::{Deserialize, Serialize};
 use super::{SagaContext, SagaId};
+use serde::{Deserialize, Serialize};
 
 /// Events published via DistributedPubSub
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SagaChoreographyEvent {
-    // Saga lifecycle
-    SagaStarted { context: SagaContext, payload: Vec<u8> },
-    SagaCompleted { context: SagaContext },
-    SagaFailed { context: SagaContext, reason: Box<str> },
-    
-    // Step execution
-    StepStarted { context: SagaContext },
-    StepCompleted {
+    /// Emitted when a new SAGA orchestration begins.
+    SagaStarted {
+        /// The saga context containing identifiers and metadata.
         context: SagaContext,
+        /// The initial payload for the saga execution.
+        payload: Vec<u8>,
+    },
+    /// Emitted when the entire saga completes successfully.
+    SagaCompleted {
+        /// The saga context containing identifiers and metadata.
+        context: SagaContext,
+    },
+    /// Emitted when the saga fails and cannot proceed.
+    SagaFailed {
+        /// The saga context containing identifiers and metadata.
+        context: SagaContext,
+        /// The reason for the saga failure.
+        reason: Box<str>,
+    },
+
+    /// Emitted when a step within the saga begins execution.
+    StepStarted {
+        /// The saga context containing identifiers and metadata.
+        context: SagaContext,
+    },
+    /// Emitted when a step completes successfully.
+    StepCompleted {
+        /// The saga context containing identifiers and metadata.
+        context: SagaContext,
+        /// The output produced by the completed step.
         output: Vec<u8>,
+        /// Whether compensation logic is available for this step if rollback is needed.
         compensation_available: bool,
     },
+    /// Emitted when a step fails during execution.
     StepFailed {
+        /// The saga context containing identifiers and metadata.
         context: SagaContext,
+        /// The error message describing why the step failed.
         error: Box<str>,
+        /// Whether the step will be retried.
         will_retry: bool,
+        /// Whether compensation is required due to this failure.
         requires_compensation: bool,
     },
-    
-    // Compensation
+
+    /// Emitted when compensation is requested for one or more steps.
     CompensationRequested {
+        /// The saga context containing identifiers and metadata.
         context: SagaContext,
+        /// The name of the step that triggered the compensation request.
         failed_step: Box<str>,
+        /// The reason compensation was requested.
         reason: Box<str>,
+        /// The list of step names that need to be compensated, in reverse execution order.
         steps_to_compensate: Vec<Box<str>>,
     },
-    CompensationStarted { context: SagaContext },
-    CompensationCompleted { context: SagaContext },
-    CompensationFailed {
+    /// Emitted when compensation begins execution.
+    CompensationStarted {
+        /// The saga context containing identifiers and metadata.
         context: SagaContext,
+    },
+    /// Emitted when compensation completes successfully.
+    CompensationCompleted {
+        /// The saga context containing identifiers and metadata.
+        context: SagaContext,
+    },
+    /// Emitted when compensation fails.
+    CompensationFailed {
+        /// The saga context containing identifiers and metadata.
+        context: SagaContext,
+        /// The error message describing why compensation failed.
         error: Box<str>,
+        /// Whether the system state is ambiguous (partial compensation may have occurred).
         is_ambiguous: bool,
     },
+    /// Emitted when a saga is quarantined due to unrecoverable errors.
     SagaQuarantined {
+        /// The saga context containing identifiers and metadata.
         context: SagaContext,
+        /// The reason the saga was quarantined.
         reason: Box<str>,
+        /// The step during which the quarantine occurred.
         step: Box<str>,
     },
-    
-    // Acknowledgment
+
+    /// Emitted as an acknowledgment from a participant for a step.
     StepAck {
+        /// The saga context containing identifiers and metadata.
         context: SagaContext,
+        /// The identifier of the participant sending the acknowledgment.
         participant_id: super::PeerId,
+        /// The status of the acknowledgment.
         status: AckStatus,
     },
 }
 
 impl SagaChoreographyEvent {
+    /// Returns a reference to the saga context associated with this event.
+    ///
+    /// @return A reference to the `SagaContext` containing saga identifiers and metadata.
     pub fn context(&self) -> &SagaContext {
         match self {
             Self::SagaStarted { context, .. } => context,
@@ -70,7 +123,10 @@ impl SagaChoreographyEvent {
             Self::StepAck { context, .. } => context,
         }
     }
-    
+
+    /// Returns a static string identifier for this event type.
+    ///
+    /// @return A `&'static str` representing the event type name (e.g., "saga_started", "step_completed").
     pub fn event_type(&self) -> &'static str {
         match self {
             Self::SagaStarted { .. } => "saga_started",
@@ -87,32 +143,101 @@ impl SagaChoreographyEvent {
             Self::StepAck { .. } => "step_ack",
         }
     }
-    
+
+    /// Constructs the pub/sub topic name for a given saga type.
+    ///
+    /// @param saga_type The type identifier for the saga.
+    /// @return A `String` in the format "saga:{saga_type}" used as the pub/sub topic.
     pub fn topic(saga_type: &str) -> String {
         format!("saga:{}", saga_type)
     }
 }
 
-/// Acknowledgment status
+/// Acknowledgment status for step processing responses.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum AckStatus {
+    /// The step has been accepted and queued for processing.
     Accepted,
+    /// The step has completed successfully.
     Completed,
+    /// The step has failed during processing.
     Failed,
+    /// The step is not applicable to this participant.
     NotApplicable,
+    /// The step is already being processed by this participant.
     AlreadyProcessing,
 }
 
-/// Events stored in participant's local journal
+/// Events stored in participant's local journal for durability and recovery.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ParticipantEvent {
-    SagaRegistered { saga_type: Box<str>, step_name: Box<str>, registered_at_millis: u64 },
-    StepTriggered { triggering_event: Box<str>, triggered_at_millis: u64 },
-    StepExecutionStarted { attempt: u32, started_at_millis: u64 },
-    StepExecutionCompleted { output: Vec<u8>, compensation_data: Vec<u8>, completed_at_millis: u64 },
-    StepExecutionFailed { error: Box<str>, requires_compensation: bool, failed_at_millis: u64 },
-    CompensationStarted { attempt: u32, started_at_millis: u64 },
-    CompensationCompleted { completed_at_millis: u64 },
-    CompensationFailed { error: Box<str>, is_ambiguous: bool, failed_at_millis: u64 },
-    Quarantined { reason: Box<str>, quarantined_at_millis: u64 },
+    /// Emitted when a participant registers to handle a step in a saga type.
+    SagaRegistered {
+        /// The type of saga this participant is registered for.
+        saga_type: Box<str>,
+        /// The name of the step this participant will handle.
+        step_name: Box<str>,
+        /// The timestamp (in milliseconds since epoch) when registration occurred.
+        registered_at_millis: u64,
+    },
+    /// Emitted when a step is triggered by an incoming choreography event.
+    StepTriggered {
+        /// The type of event that triggered this step.
+        triggering_event: Box<str>,
+        /// The timestamp (in milliseconds since epoch) when the step was triggered.
+        triggered_at_millis: u64,
+    },
+    /// Emitted when step execution begins.
+    StepExecutionStarted {
+        /// The current attempt number (1 for initial attempt, incremented on retries).
+        attempt: u32,
+        /// The timestamp (in milliseconds since epoch) when execution started.
+        started_at_millis: u64,
+    },
+    /// Emitted when step execution completes successfully.
+    StepExecutionCompleted {
+        /// The output produced by the step execution.
+        output: Vec<u8>,
+        /// Data stored for potential compensation if rollback is needed.
+        compensation_data: Vec<u8>,
+        /// The timestamp (in milliseconds since epoch) when execution completed.
+        completed_at_millis: u64,
+    },
+    /// Emitted when step execution fails.
+    StepExecutionFailed {
+        /// The error message describing why execution failed.
+        error: Box<str>,
+        /// Whether compensation is required due to this failure.
+        requires_compensation: bool,
+        /// The timestamp (in milliseconds since epoch) when execution failed.
+        failed_at_millis: u64,
+    },
+    /// Emitted when compensation execution begins.
+    CompensationStarted {
+        /// The current attempt number (1 for initial attempt, incremented on retries).
+        attempt: u32,
+        /// The timestamp (in milliseconds since epoch) when compensation started.
+        started_at_millis: u64,
+    },
+    /// Emitted when compensation completes successfully.
+    CompensationCompleted {
+        /// The timestamp (in milliseconds since epoch) when compensation completed.
+        completed_at_millis: u64,
+    },
+    /// Emitted when compensation fails.
+    CompensationFailed {
+        /// The error message describing why compensation failed.
+        error: Box<str>,
+        /// Whether the system state is ambiguous (partial compensation may have occurred).
+        is_ambiguous: bool,
+        /// The timestamp (in milliseconds since epoch) when compensation failed.
+        failed_at_millis: u64,
+    },
+    /// Emitted when a participant is quarantined due to unrecoverable errors.
+    Quarantined {
+        /// The reason the participant was quarantined.
+        reason: Box<str>,
+        /// The timestamp (in milliseconds since epoch) when quarantine occurred.
+        quarantined_at_millis: u64,
+    },
 }
