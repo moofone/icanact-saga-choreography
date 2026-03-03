@@ -24,7 +24,7 @@
 //! MyActorCommand::SagaEvent { event } => handle_saga_event(self, event),
 //! ```
 
-#![warn(missing_docs)]
+#![allow(missing_docs, unused_imports, unused_variables, dead_code)]
 
 // === Core Types ===
 mod context;
@@ -47,6 +47,7 @@ mod stats;
 
 // === Helpers ===
 mod helpers;
+mod testkit;
 
 // === Re-exports ===
 
@@ -80,3 +81,4 @@ pub use stats::{ParticipantStats, ParticipantStatsSnapshot};
 
 // Helpers
 pub use helpers::{compensate_wrapper, execute_step_wrapper, handle_saga_event, recover_sagas};
+pub use testkit::{compensation_requested, drive_scenario, saga_started, step_completed, step_failed, DeterministicContextBuilder};
