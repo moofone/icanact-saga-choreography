@@ -1,15 +1,15 @@
 //! Core traits for saga participants
 
-use crate::{SagaContext, StepOutput, StepError, CompensationError};
+use crate::{CompensationError, SagaContext, StepError, StepOutput};
 
 /// Trait for actors that participate in choreography-based sagas.
-/// 
+///
 /// Actors implementing this trait handle saga events alongside their
 /// normal business messages. The saga state is isolated from business
 /// state using the typestate pattern.
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust,ignore
 /// impl SagaParticipant for OrderManagerActor {
 ///     type Error = OrderError;
@@ -17,14 +17,14 @@ use crate::{SagaContext, StepOutput, StepError, CompensationError};
 ///     fn step_name(&self) -> &str { "create_order" }
 ///     fn saga_types(&self) -> &[&'static str] { &["order_workflow"] }
 ///     
-///     fn execute_step(&mut self, ctx: &SagaContext, input: &[u8]) 
-///         -> Result<StepOutput, StepError> 
+///     fn execute_step(&mut self, ctx: &SagaContext, input: &[u8])
+///         -> Result<StepOutput, StepError>
 ///     {
 ///         // Use self.deribit_ws.ask() to place order
 ///     }
 ///     
-///     fn compensate_step(&mut self, ctx: &SagaContext, data: &[u8]) 
-///         -> Result<(), CompensationError> 
+///     fn compensate_step(&mut self, ctx: &SagaContext, data: &[u8])
+///         -> Result<(), CompensationError>
 ///     {
 ///         // Cancel the order
 ///     }
@@ -33,24 +33,24 @@ use crate::{SagaContext, StepOutput, StepError, CompensationError};
 pub trait SagaParticipant: Send + 'static {
     /// Error type for this participant
     type Error: std::fmt::Debug + Send;
-    
+
     /// The step name this participant handles
     fn step_name(&self) -> &str;
-    
+
     /// Which saga types this participant joins
     fn saga_types(&self) -> &[&'static str];
-    
+
     /// Execute the forward step
-    /// 
+    ///
     /// Called when a triggering event is received (based on `depends_on`).
     fn execute_step(
         &mut self,
         context: &SagaContext,
         input: &[u8],
     ) -> Result<StepOutput, StepError>;
-    
+
     /// Execute compensation (undo)
-    /// 
+    ///
     /// Called when `CompensationRequested` is received and this step
     /// is in the compensation list.
     fn compensate_step(
@@ -58,32 +58,32 @@ pub trait SagaParticipant: Send + 'static {
         context: &SagaContext,
         compensation_data: &[u8],
     ) -> Result<(), CompensationError>;
-    
+
     // === Optional Hooks ===
-    
+
     /// Called after saga completes successfully
     fn on_saga_completed(&mut self, _context: &SagaContext) {}
-    
+
     /// Called after saga fails
     fn on_saga_failed(&mut self, _context: &SagaContext, _reason: &str) {}
-    
+
     /// Called after compensation completes
     fn on_compensation_completed(&mut self, _context: &SagaContext) {}
-    
+
     /// Called when saga is quarantined
     fn on_quarantined(&mut self, _context: &SagaContext, _reason: &str) {}
-    
+
     /// When does this participant execute?
     /// Default: execute when saga starts
     fn depends_on(&self) -> DependencySpec {
         DependencySpec::OnSagaStart
     }
-    
+
     /// Retry policy for this step
     fn retry_policy(&self) -> RetryPolicy {
         RetryPolicy::default()
     }
-    
+
     /// Timeout for step execution
     fn step_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(30)
@@ -113,7 +113,7 @@ impl DependencySpec {
             DependencySpec::AllOf(steps) => steps.contains(&completed_step),
         }
     }
-    
+
     /// Check if this is OnSagaStart
     pub fn is_on_saga_start(&self) -> bool {
         matches!(self, DependencySpec::OnSagaStart)
@@ -150,9 +150,11 @@ impl RetryPolicy {
         if attempt == 0 {
             return std::time::Duration::from_millis(0);
         }
-        
-        let delay = self.initial_delay_millis as f64 
-            * self.backoff_multiplier.powi(attempt.saturating_sub(1) as i32);
+
+        let delay = self.initial_delay_millis as f64
+            * self
+                .backoff_multiplier
+                .powi(attempt.saturating_sub(1) as i32);
         let capped = delay.min(self.max_delay_millis as f64);
         std::time::Duration::from_millis(capped as u64)
     }
@@ -161,19 +163,31 @@ impl RetryPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_retry_delay() {
         let policy = RetryPolicy::default();
-        
-        assert_eq!(policy.delay_for_attempt(0), std::time::Duration::from_millis(0));
-        assert_eq!(policy.delay_for_attempt(1), std::time::Duration::from_millis(1000));
-        assert_eq!(policy.delay_for_attempt(2), std::time::Duration::from_millis(2000));
-        assert_eq!(policy.delay_for_attempt(3), std::time::Duration::from_millis(4000));
+
+        assert_eq!(
+            policy.delay_for_attempt(0),
+            std::time::Duration::from_millis(0)
+        );
+        assert_eq!(
+            policy.delay_for_attempt(1),
+            std::time::Duration::from_millis(1000)
+        );
+        assert_eq!(
+            policy.delay_for_attempt(2),
+            std::time::Duration::from_millis(2000)
+        );
+        assert_eq!(
+            policy.delay_for_attempt(3),
+            std::time::Duration::from_millis(4000)
+        );
         // Would be 8000 but capped at max
         assert!(policy.delay_for_attempt(10) <= std::time::Duration::from_millis(30000));
     }
-    
+
     #[test]
     fn test_dependency_spec() {
         let spec = DependencySpec::After("reserve_inventory");

@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// ```
 /// # use icanact_saga_choreography::{IdempotencyKey, SagaId};
-/// # let saga_id = SagaId::new();
+/// # let saga_id = SagaId::new(1);
 /// let key = IdempotencyKey::for_step(saga_id, "reserve_inventory", 1);
 /// assert!(key.as_str().contains("reserve_inventory"));
 /// ```
@@ -67,7 +67,7 @@ impl IdempotencyKey {
     ///
     /// ```
     /// # use icanact_saga_choreography::{IdempotencyKey, SagaId};
-    /// # let saga_id = SagaId::new();
+    /// # let saga_id = SagaId::new(1);
     /// let key = IdempotencyKey::for_step(saga_id, "charge_payment", 2);
     /// // Key format: "saga:{uuid}:step:charge_payment:attempt:2"
     /// ```
@@ -94,7 +94,7 @@ impl IdempotencyKey {
     ///
     /// ```
     /// # use icanact_saga_choreography::{IdempotencyKey, SagaId};
-    /// # let saga_id = SagaId::new();
+    /// # let saga_id = SagaId::new(1);
     /// let key = IdempotencyKey::for_compensation(saga_id, "reserve_inventory");
     /// // Key format: "saga:{uuid}:compensate:reserve_inventory"
     /// ```
@@ -115,7 +115,7 @@ impl IdempotencyKey {
     ///
     /// ```
     /// # use icanact_saga_choreography::{IdempotencyKey, SagaId};
-    /// # let saga_id = SagaId::new();
+    /// # let saga_id = SagaId::new(1);
     /// let key = IdempotencyKey::for_step(saga_id, "process", 1);
     /// assert!(key.as_str().starts_with("saga:"));
     /// ```

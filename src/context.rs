@@ -11,7 +11,7 @@ impl SagaId {
     pub fn new(id: u64) -> Self {
         Self(id)
     }
-    
+
     /// Get the raw ID value
     pub fn get(&self) -> u64 {
         self.0
@@ -77,7 +77,7 @@ impl SagaContext {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
-    
+
     /// Create a context for the next step in sequence
     pub fn next_step(&self, step_name: Box<str>) -> Self {
         Self {
@@ -90,7 +90,7 @@ impl SagaContext {
             ..self.clone()
         }
     }
-    
+
     /// Create a context for a retry attempt
     pub fn retry(&self) -> Self {
         Self {
@@ -100,7 +100,7 @@ impl SagaContext {
             ..self.clone()
         }
     }
-    
+
     /// Create a context for compensation
     pub fn for_compensation(&self) -> Self {
         Self {
@@ -110,12 +110,13 @@ impl SagaContext {
             ..self.clone()
         }
     }
-    
+
     /// Calculate elapsed time since saga started
     pub fn elapsed_millis(&self) -> u64 {
-        self.event_timestamp_millis.saturating_sub(self.saga_started_at_millis)
+        self.event_timestamp_millis
+            .saturating_sub(self.saga_started_at_millis)
     }
-    
+
     fn next_trace_id() -> u64 {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(1);

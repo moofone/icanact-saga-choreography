@@ -2,8 +2,8 @@
 
 use crate::{
     Compensating, CompensationError, Completed, DependencySpec, Executing, ParticipantEvent,
-    SagaChoreographyEvent, SagaContext, SagaId, SagaParticipant, SagaParticipantState,
-    SagaStateEntry, SagaStateExt, StepError, StepOutput,
+    ParticipantJournal, SagaChoreographyEvent, SagaContext, SagaId, SagaParticipant,
+    SagaParticipantState, SagaStateEntry, SagaStateExt, StepError, StepOutput,
 };
 use std::sync::atomic::Ordering;
 

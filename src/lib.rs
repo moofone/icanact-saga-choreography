@@ -9,9 +9,9 @@
 //! // 1. Add saga state fields to your actor
 //! pub struct MyActor {
 //!     saga_states: HashMap<SagaId, SagaStateEntry>,
-//!     saga_journal: Arc<dyn ParticipantJournal>,
-//!     saga_dedupe: Arc<dyn ParticipantDedupeStore>,
-//!     saga_stats: Arc<ParticipantStats>,
+//!     saga_journal: InMemoryJournal,
+//!     saga_dedupe: InMemoryDedupe,
+//!     saga_stats: ParticipantStats,
 //! }
 //!
 //! // 2. Implement SagaStateExt (boilerplate)
@@ -81,4 +81,7 @@ pub use stats::{ParticipantStats, ParticipantStatsSnapshot};
 
 // Helpers
 pub use helpers::{compensate_wrapper, execute_step_wrapper, handle_saga_event, recover_sagas};
-pub use testkit::{compensation_requested, drive_scenario, saga_started, step_completed, step_failed, DeterministicContextBuilder};
+pub use testkit::{
+    compensation_requested, drive_scenario, saga_started, step_completed, step_failed,
+    DeterministicContextBuilder,
+};
