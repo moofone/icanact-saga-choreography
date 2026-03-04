@@ -6,7 +6,6 @@
 
 use crate::{ParticipantDedupeStore, ParticipantEvent, ParticipantJournal, SagaId, SagaStateEntry};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Extension trait providing common saga state management operations.
 ///
@@ -28,11 +27,14 @@ use std::sync::Arc;
 /// ```ignore
 /// struct MyStateManager {
 ///     states: HashMap<SagaId, SagaStateEntry>,
-///     journal: Arc<dyn ParticipantJournal>,
-///     dedupe: Arc<dyn ParticipantDedupeStore>,
+///     journal: InMemoryJournal,
+///     dedupe: InMemoryDedupe,
 /// }
 ///
 /// impl SagaStateExt for MyStateManager {
+///     type Journal = InMemoryJournal;
+///     type Dedupe = InMemoryDedupe;
+///
 ///     fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> {
 ///         &mut self.states
 ///     }
@@ -40,6 +42,9 @@ use std::sync::Arc;
 /// }
 /// ```
 pub trait SagaStateExt: Send + 'static {
+    type Journal: ParticipantJournal;
+    type Dedupe: ParticipantDedupeStore;
+
     /// Returns mutable access to the saga state map.
     ///
     /// This provides direct access to the underlying storage for saga state entries,
@@ -56,13 +61,13 @@ pub trait SagaStateExt: Send + 'static {
     ///
     /// The journal is used to durably record saga events for recovery
     /// and audit purposes.
-    fn saga_journal(&self) -> &Arc<dyn ParticipantJournal>;
+    fn saga_journal(&self) -> &Self::Journal;
 
     /// Returns the deduplication store for idempotency tracking.
     ///
     /// The dedupe store tracks which operations have already been processed
     /// to prevent duplicate execution of side effects.
-    fn saga_dedupe(&self) -> &Arc<dyn ParticipantDedupeStore>;
+    fn saga_dedupe(&self) -> &Self::Dedupe;
 
     /// Returns the current timestamp in milliseconds.
     ///

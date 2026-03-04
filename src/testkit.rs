@@ -1,6 +1,8 @@
 //! Deterministic helpers for participant choreography tests.
 
-use crate::{SagaChoreographyEvent, SagaContext, SagaId, SagaStateExt, SagaParticipant, handle_saga_event};
+use crate::{
+    handle_saga_event, SagaChoreographyEvent, SagaContext, SagaId, SagaParticipant, SagaStateExt,
+};
 
 /// Small deterministic builder for saga test contexts.
 #[derive(Debug, Clone)]
@@ -116,8 +118,10 @@ pub fn compensation_requested(
 }
 
 /// Replay a deterministic event sequence against one participant.
-pub fn drive_scenario<P>(participant: &mut P, events: impl IntoIterator<Item = SagaChoreographyEvent>)
-where
+pub fn drive_scenario<P>(
+    participant: &mut P,
+    events: impl IntoIterator<Item = SagaChoreographyEvent>,
+) where
     P: SagaParticipant + SagaStateExt,
 {
     for event in events {
@@ -128,20 +132,19 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Arc;
 
     use crate::{
-        CompensationError, DependencySpec, InMemoryDedupe, InMemoryJournal, ParticipantDedupeStore,
-        ParticipantJournal, ParticipantStats, SagaStateEntry, StepError, StepOutput,
+        CompensationError, DependencySpec, InMemoryDedupe, InMemoryJournal, ParticipantStats,
+        SagaStateEntry, StepError, StepOutput,
     };
 
     use super::*;
 
     struct TestParticipant {
         states: HashMap<SagaId, SagaStateEntry>,
-        journal: Arc<dyn ParticipantJournal>,
-        dedupe: Arc<dyn ParticipantDedupeStore>,
-        stats: Arc<ParticipantStats>,
+        journal: InMemoryJournal,
+        dedupe: InMemoryDedupe,
+        stats: ParticipantStats,
         called: bool,
     }
 
@@ -149,15 +152,18 @@ mod tests {
         fn default() -> Self {
             Self {
                 states: HashMap::new(),
-                journal: Arc::new(InMemoryJournal::new()),
-                dedupe: Arc::new(InMemoryDedupe::new()),
-                stats: Arc::new(ParticipantStats::new()),
+                journal: InMemoryJournal::new(),
+                dedupe: InMemoryDedupe::new(),
+                stats: ParticipantStats::new(),
                 called: false,
             }
         }
     }
 
     impl SagaStateExt for TestParticipant {
+        type Journal = InMemoryJournal;
+        type Dedupe = InMemoryDedupe;
+
         fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> {
             &mut self.states
         }
@@ -166,11 +172,11 @@ mod tests {
             &self.states
         }
 
-        fn saga_journal(&self) -> &Arc<dyn ParticipantJournal> {
+        fn saga_journal(&self) -> &Self::Journal {
             &self.journal
         }
 
-        fn saga_dedupe(&self) -> &Arc<dyn ParticipantDedupeStore> {
+        fn saga_dedupe(&self) -> &Self::Dedupe {
             &self.dedupe
         }
 

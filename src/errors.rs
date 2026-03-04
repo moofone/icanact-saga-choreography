@@ -48,7 +48,7 @@ impl StepError {
     pub fn is_retriable(&self) -> bool {
         matches!(self, Self::Retriable { .. })
     }
-    
+
     /// Check if this error requires compensation
     pub fn requires_compensation(&self) -> bool {
         matches!(self, Self::RequireCompensation { .. })
@@ -80,7 +80,7 @@ impl CompensationError {
     pub fn is_safe_to_retry(&self) -> bool {
         matches!(self, Self::SafeToRetry { .. })
     }
-    
+
     /// Check if state is ambiguous
     pub fn is_ambiguous(&self) -> bool {
         matches!(self, Self::Ambiguous { .. })
