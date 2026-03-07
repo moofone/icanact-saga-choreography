@@ -118,6 +118,12 @@ impl DependencySpec {
     pub fn is_on_saga_start(&self) -> bool {
         matches!(self, DependencySpec::OnSagaStart)
     }
+
+    /// Whether dependent execution should use the original saga input
+    /// rather than the upstream step output.
+    pub fn prefers_original_saga_input(&self) -> bool {
+        matches!(self, DependencySpec::AllOf(_))
+    }
 }
 
 /// Retry policy for step execution

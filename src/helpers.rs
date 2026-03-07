@@ -54,7 +54,7 @@ where
     }
 
     // Idempotency check
-    let dedupe_key = format!("{}:{}", context.trace_id, event.event_type());
+    let dedupe_key = dedupe_key_for_event(&event);
     if !participant.check_dedupe(context.saga_id, &dedupe_key) {
         return; // Already processed
     }
@@ -69,14 +69,18 @@ where
         SagaChoreographyEvent::StepCompleted {
             context: step_ctx,
             output,
+            saga_input,
             ..
         } => {
-            if participant
-                .depends_on()
-                .is_satisfied_by(&step_ctx.step_name)
-            {
+            let dependency_spec = participant.depends_on();
+            if dependency_spec.is_satisfied_by(&step_ctx.step_name) {
                 let next_context = context.next_step(participant.step_name().into());
-                execute_step_wrapper_with_emit(participant, next_context, output, now, &mut emit);
+                let input = if dependency_spec.prefers_original_saga_input() {
+                    saga_input
+                } else {
+                    output
+                };
+                execute_step_wrapper_with_emit(participant, next_context, input, now, &mut emit);
             }
         }
 
@@ -100,6 +104,34 @@ where
         }
 
         _ => {}
+    }
+}
+
+fn dedupe_key_for_event(event: &SagaChoreographyEvent) -> String {
+    let context = event.context();
+    match event {
+        SagaChoreographyEvent::SagaStarted { .. } => {
+            format!("{}:{}:{}", context.trace_id, event.event_type(), context.step_name)
+        }
+        SagaChoreographyEvent::StepCompleted { .. }
+        | SagaChoreographyEvent::StepFailed { .. }
+        | SagaChoreographyEvent::CompensationStarted { .. }
+        | SagaChoreographyEvent::CompensationCompleted { .. }
+        | SagaChoreographyEvent::CompensationFailed { .. }
+        | SagaChoreographyEvent::SagaCompleted { .. }
+        | SagaChoreographyEvent::SagaFailed { .. }
+        | SagaChoreographyEvent::SagaQuarantined { .. }
+        | SagaChoreographyEvent::StepStarted { .. }
+        | SagaChoreographyEvent::StepAck { .. } => {
+            format!("{}:{}:{}", context.trace_id, event.event_type(), context.step_name)
+        }
+        SagaChoreographyEvent::CompensationRequested { failed_step, .. } => format!(
+            "{}:{}:{}:{}",
+            context.trace_id,
+            event.event_type(),
+            context.step_name,
+            failed_step
+        ),
     }
 }
 
@@ -154,7 +186,7 @@ fn execute_step_wrapper_with_emit<P, F>(
     // Execute
     match participant.execute_step(&context, &input) {
         Ok(output) => {
-            complete_step(participant, &context, output, now, emit);
+            complete_step(participant, &context, input, output, now, emit);
         }
         Err(error) => {
             fail_step(participant, &context, error, now, emit);
@@ -166,6 +198,7 @@ fn execute_step_wrapper_with_emit<P, F>(
 fn complete_step<P, F>(
     participant: &mut P,
     context: &SagaContext,
+    saga_input: Vec<u8>,
     output: StepOutput,
     now: u64,
     emit: &mut F,
@@ -215,6 +248,7 @@ where
     emit(SagaChoreographyEvent::StepCompleted {
         context: context.next_step(participant.step_name().into()),
         output: emitted_output,
+        saga_input,
         compensation_available,
     });
 }
@@ -512,6 +546,8 @@ mod tests {
         execute_mode: ExecuteMode,
         compensation_error: Option<CompensationError>,
         executed: usize,
+        observed_inputs: Vec<Vec<u8>>,
+        dependency_spec: DependencySpec,
     }
 
     impl Default for TestParticipant {
@@ -523,6 +559,8 @@ mod tests {
                 execute_mode: ExecuteMode::Completed,
                 compensation_error: None,
                 executed: 0,
+                observed_inputs: Vec::new(),
+                dependency_spec: DependencySpec::OnSagaStart,
             }
         }
     }
@@ -564,7 +602,7 @@ mod tests {
         }
 
         fn depends_on(&self) -> DependencySpec {
-            DependencySpec::OnSagaStart
+            self.dependency_spec.clone()
         }
 
         fn execute_step(
@@ -573,6 +611,7 @@ mod tests {
             _input: &[u8],
         ) -> Result<StepOutput, StepError> {
             self.executed = self.executed.saturating_add(1);
+            self.observed_inputs.push(_input.to_vec());
             match self.execute_mode {
                 ExecuteMode::Completed => Ok(StepOutput::Completed {
                     output: vec![1, 2, 3],
@@ -660,6 +699,61 @@ mod tests {
         let mut participant = TestParticipant::default();
         handle_saga_event(&mut participant, started_event());
         assert_eq!(participant.executed, 1);
+    }
+
+    #[test]
+    fn handle_saga_event_with_emit_processes_distinct_step_completed_events() {
+        let mut participant = TestParticipant {
+            dependency_spec: DependencySpec::AllOf(&["risk_check", "positions_check"]),
+            ..TestParticipant::default()
+        };
+        let mut emitted = Vec::new();
+        let context = DeterministicContextBuilder::default().build();
+
+        handle_saga_event_with_emit(
+            &mut participant,
+            SagaChoreographyEvent::StepCompleted {
+                context: context.next_step("risk_check".into()),
+                output: vec![9],
+                saga_input: vec![7],
+                compensation_available: false,
+            },
+            |event| emitted.push(event),
+        );
+        handle_saga_event_with_emit(
+            &mut participant,
+            SagaChoreographyEvent::StepCompleted {
+                context: context.next_step("positions_check".into()),
+                output: vec![8],
+                saga_input: vec![7],
+                compensation_available: false,
+            },
+            |event| emitted.push(event),
+        );
+
+        assert_eq!(participant.executed, 2);
+    }
+
+    #[test]
+    fn handle_saga_event_with_emit_allof_uses_original_saga_input() {
+        let mut participant = TestParticipant {
+            dependency_spec: DependencySpec::AllOf(&["risk_check", "positions_check"]),
+            ..TestParticipant::default()
+        };
+        let context = DeterministicContextBuilder::default().build();
+
+        handle_saga_event_with_emit(
+            &mut participant,
+            SagaChoreographyEvent::StepCompleted {
+                context: context.next_step("risk_check".into()),
+                output: vec![9],
+                saga_input: vec![7, 7, 7],
+                compensation_available: false,
+            },
+            |_| {},
+        );
+
+        assert_eq!(participant.observed_inputs, vec![vec![7, 7, 7]]);
     }
 
     #[test]
