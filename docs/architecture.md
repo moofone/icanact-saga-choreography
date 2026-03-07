@@ -10,7 +10,7 @@ The key idea is simple: actors already represent service boundaries, so saga par
 
 - Each saga participant is a normal actor that handles business messages plus saga events.
 - Participants communicate through pubsub saga events (`SagaChoreographyEvent`).
-- Each participant owns local saga state keyed by `SagaId`.
+- Each participant should embed one `SagaParticipantSupport<J, D>` field that owns local choreography state keyed by `SagaId`.
 - Each participant persists participant-local events to a journal and deduplicates incoming events.
 - Failure handling is compensation-driven, with quarantine for ambiguous compensation outcomes.
 
@@ -41,10 +41,10 @@ flowchart LR
 | Area | Framework (`icanact-saga-choreography`) | Actor Implementation |
 |---|---|---|
 | Identity and context | `SagaId`, `SagaContext`, `IdempotencyKey` | Populate context at saga start and across steps |
-| State model | Typestate containers and transitions (`Idle`, `Executing`, `Completed`, etc.) | Store per-saga entries in actor state |
+| State model | Typestate containers and transitions (`Idle`, `Executing`, `Completed`, etc.) plus `SagaParticipantSupport<J, D>` | Embed one `saga` field on the actor |
 | Events | `SagaChoreographyEvent`, `ParticipantEvent` | Publish/consume events for the saga type |
 | Execution contract | `SagaParticipant` trait | Implement `execute_step`, `compensate_step`, dependencies, retry policy |
-| State access contract | `SagaStateExt` trait | Expose `saga_states`, journal, dedupe store, and clock |
+| State access contract | `HasSagaParticipantSupport` + blanket `SagaStateExt` | Expose the embedded `saga` field |
 | Persistence contract | `ParticipantJournal` and `ParticipantDedupeStore` traits | Provide concrete backend (in-memory, LMDB/Heed, etc.) |
 | Runtime helpers | `handle_saga_event`, `execute_step_wrapper`, `compensate_wrapper`, `recover_sagas` | Wire helpers into actor message handling |
 | Observability | `ParticipantStats`, `SagaObserver` | Export metrics and connect observer implementation |
@@ -94,9 +94,8 @@ sequenceDiagram
 ## How We Use It
 
 1. Define the saga type and step names for the workflow.
-2. Add saga state fields to each participant actor:
-   `saga_states`, `saga_journal`, `saga_dedupe`, and typically `saga_stats`.
-3. Implement `SagaStateExt` to expose those fields and time source.
+2. Add `saga: SagaParticipantSupport<Journal, Dedupe>` to each participant actor.
+3. Implement `HasSagaParticipantSupport` for the actor. `SagaStateExt` is then derived automatically.
 4. Implement `SagaParticipant` for business behavior:
    step identity, forward execution, compensation, dependencies, retry policy.
 5. Add a saga event variant to the actor command enum and route it to `handle_saga_event`.

@@ -36,8 +36,7 @@ pub fn handle_saga_event_with_emit<P, F>(
     participant: &mut P,
     event: SagaChoreographyEvent,
     mut emit: F,
-)
-where
+) where
     P: SagaParticipant + SagaStateExt,
     F: FnMut(SagaChoreographyEvent),
 {
@@ -111,7 +110,12 @@ fn dedupe_key_for_event(event: &SagaChoreographyEvent) -> String {
     let context = event.context();
     match event {
         SagaChoreographyEvent::SagaStarted { .. } => {
-            format!("{}:{}:{}", context.trace_id, event.event_type(), context.step_name)
+            format!(
+                "{}:{}:{}",
+                context.trace_id,
+                event.event_type(),
+                context.step_name
+            )
         }
         SagaChoreographyEvent::StepCompleted { .. }
         | SagaChoreographyEvent::StepFailed { .. }
@@ -123,7 +127,12 @@ fn dedupe_key_for_event(event: &SagaChoreographyEvent) -> String {
         | SagaChoreographyEvent::SagaQuarantined { .. }
         | SagaChoreographyEvent::StepStarted { .. }
         | SagaChoreographyEvent::StepAck { .. } => {
-            format!("{}:{}:{}", context.trace_id, event.event_type(), context.step_name)
+            format!(
+                "{}:{}:{}",
+                context.trace_id,
+                event.event_type(),
+                context.step_name
+            )
         }
         SagaChoreographyEvent::CompensationRequested { failed_step, .. } => format!(
             "{}:{}:{}:{}",
@@ -202,8 +211,7 @@ fn complete_step<P, F>(
     output: StepOutput,
     now: u64,
     emit: &mut F,
-)
-where
+) where
     P: SagaParticipant + SagaStateExt,
     F: FnMut(SagaChoreographyEvent),
 {
@@ -260,8 +268,7 @@ fn fail_step<P, F>(
     error: StepError,
     now: u64,
     emit: &mut F,
-)
-where
+) where
     P: SagaParticipant + SagaStateExt,
     F: FnMut(SagaChoreographyEvent),
 {
@@ -354,12 +361,7 @@ fn compensate_wrapper_with_emit<P, F>(
 }
 
 /// Complete compensation
-fn complete_compensation<P, F>(
-    participant: &mut P,
-    context: &SagaContext,
-    now: u64,
-    emit: &mut F,
-)
+fn complete_compensation<P, F>(participant: &mut P, context: &SagaContext, now: u64, emit: &mut F)
 where
     P: SagaParticipant + SagaStateExt,
     F: FnMut(SagaChoreographyEvent),
@@ -524,11 +526,9 @@ impl RebuiltState {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::{
-        DeterministicContextBuilder, InMemoryDedupe, InMemoryJournal, ParticipantDedupeStore,
-        ParticipantJournal, SagaContext, SagaId, SagaStateEntry,
+        DeterministicContextBuilder, HasSagaParticipantSupport, InMemoryDedupe, InMemoryJournal,
+        SagaContext, SagaId, SagaParticipantSupport,
     };
 
     use super::*;
@@ -540,9 +540,7 @@ mod tests {
     }
 
     struct TestParticipant {
-        states: HashMap<SagaId, SagaStateEntry>,
-        journal: InMemoryJournal,
-        dedupe: InMemoryDedupe,
+        saga: SagaParticipantSupport<InMemoryJournal, InMemoryDedupe>,
         execute_mode: ExecuteMode,
         compensation_error: Option<CompensationError>,
         executed: usize,
@@ -553,9 +551,7 @@ mod tests {
     impl Default for TestParticipant {
         fn default() -> Self {
             Self {
-                states: HashMap::new(),
-                journal: InMemoryJournal::new(),
-                dedupe: InMemoryDedupe::new(),
+                saga: SagaParticipantSupport::new(InMemoryJournal::new(), InMemoryDedupe::new()),
                 execute_mode: ExecuteMode::Completed,
                 compensation_error: None,
                 executed: 0,
@@ -565,28 +561,16 @@ mod tests {
         }
     }
 
-    impl SagaStateExt for TestParticipant {
+    impl HasSagaParticipantSupport for TestParticipant {
         type Journal = InMemoryJournal;
         type Dedupe = InMemoryDedupe;
 
-        fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> {
-            &mut self.states
+        fn saga_support(&self) -> &SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+            &self.saga
         }
 
-        fn saga_states_ref(&self) -> &HashMap<SagaId, SagaStateEntry> {
-            &self.states
-        }
-
-        fn saga_journal(&self) -> &Self::Journal {
-            &self.journal
-        }
-
-        fn saga_dedupe(&self) -> &Self::Dedupe {
-            &self.dedupe
-        }
-
-        fn now_millis(&self) -> u64 {
-            1_700_000_000_000
+        fn saga_support_mut(&mut self) -> &mut SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+            &mut self.saga
         }
     }
 
@@ -647,7 +631,9 @@ mod tests {
         let mut participant = TestParticipant::default();
         let mut emitted = Vec::new();
 
-        handle_saga_event_with_emit(&mut participant, started_event(), |event| emitted.push(event));
+        handle_saga_event_with_emit(&mut participant, started_event(), |event| {
+            emitted.push(event)
+        });
 
         assert_eq!(participant.executed, 1);
         assert_eq!(emitted.len(), 1);
@@ -668,7 +654,9 @@ mod tests {
         };
         let mut emitted = Vec::new();
 
-        handle_saga_event_with_emit(&mut participant, started_event(), |event| emitted.push(event));
+        handle_saga_event_with_emit(&mut participant, started_event(), |event| {
+            emitted.push(event)
+        });
 
         assert_eq!(participant.executed, 1);
         assert_eq!(emitted.len(), 1);

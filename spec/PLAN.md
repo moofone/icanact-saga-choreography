@@ -1,5 +1,28 @@
 # Choreography-Based SAGA Architecture Plan
 
+## Progress
+
+- completed: embedded `SagaParticipantSupport<J, D>` support object added
+- completed: `HasSagaParticipantSupport<J, D>` access trait added
+- completed: blanket `SagaStateExt` implementation for embedded support added
+- completed: crate-internal tests migrated to the embedded support path where needed
+- completed: one real downstream integration pattern validated by migrating `rust_bot_v2` execution saga actors onto embedded support
+- completed: canonical crate docs now prefer embedded saga support over manual `SagaStateExt` plumbing
+- completed: quality-gate validation and follow-up fixes
+
+## Canonical Integration Note
+
+The embedded `saga: SagaParticipantSupport<J, D>` model is now the canonical integration path.
+
+Historical references in this document to per-actor flat fields and dedicated `state_ext.rs` boilerplate are obsolete and should not be used for any new integration.
+
+## Verified
+
+- cargo fmt --check
+- cargo check --all-targets
+- cargo test --all-targets
+- RUSTFLAGS='-D warnings' cargo test --all-targets
+
 ## Executive Summary
 
 A choreography-based SAGA pattern that integrates **natively** with `icanact-core` actors.
@@ -949,4 +972,3 @@ harness.drop_ws_connection();
 | `test_concurrent_sagas_different_instruments` | Parallel execution |
 | `test_saga_quarantine_on_compensation_failure` | Quarantine flow |
 | `test_circuit_breaker_on_repeated_failures` | Repeated failures |
-

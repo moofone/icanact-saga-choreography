@@ -1,21 +1,32 @@
 //! Choreography-Based SAGA for icanact-core Actors
 //!
 //! A choreography-based SAGA pattern that integrates natively with `icanact-core` actors.
-//! Actors implement two traits (`SagaParticipant` + `SagaStateExt`) to participate in sagas.
+//! Actors implement saga business behavior via `SagaParticipant`, and can either:
+//!
+//! - implement `SagaStateExt` directly, or
+//! - embed `SagaParticipantSupport` and implement `HasSagaParticipantSupport`
+//!   to get `SagaStateExt` automatically.
 //!
 //! # Quick Start
 //!
 //! ```rust,ignore
-//! // 1. Add saga state fields to your actor
+//! // 1. Add one embedded saga support field to your actor
 //! pub struct MyActor {
-//!     saga_states: HashMap<SagaId, SagaStateEntry>,
-//!     saga_journal: InMemoryJournal,
-//!     saga_dedupe: InMemoryDedupe,
-//!     saga_stats: ParticipantStats,
+//!     saga: SagaParticipantSupport<InMemoryJournal, InMemoryDedupe>,
 //! }
 //!
-//! // 2. Implement SagaStateExt (boilerplate)
-//! impl SagaStateExt for MyActor { /* ... */ }
+//! // 2. Expose the embedded support
+//! impl HasSagaParticipantSupport for MyActor {
+//!     type Journal = InMemoryJournal;
+//!     type Dedupe = InMemoryDedupe;
+//!
+//!     fn saga_support(&self) -> &SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+//!         &self.saga
+//!     }
+//!     fn saga_support_mut(&mut self) -> &mut SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+//!         &mut self.saga
+//!     }
+//! }
 //!
 //! // 3. Implement SagaParticipant (business logic)
 //! impl SagaParticipant for MyActor { /* ... */ }
@@ -32,6 +43,7 @@ mod errors;
 mod events;
 mod idempotency;
 mod state;
+mod support;
 
 // === Traits ===
 mod state_ext;
@@ -60,6 +72,7 @@ pub use state::{
     Compensated, Compensating, Completed, Executing, Failed, Idle, Quarantined,
     SagaParticipantState, SagaStateEntry, TimestampedEvent, Triggered,
 };
+pub use support::{HasSagaParticipantSupport, SagaParticipantSupport, SagaParticipantSupportExt};
 
 // Events
 pub use events::{AckStatus, ParticipantEvent, SagaChoreographyEvent};

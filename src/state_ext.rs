@@ -1,18 +1,25 @@
 //! Extension trait for saga state management.
 //!
 //! This module provides the [`SagaStateExt`] trait, which supplies common
-//! boilerplate methods for managing saga state, deduplication, and journaling.
-//! Implement this trait for types that need to participate in saga orchestration.
+//! state-management methods for saga participants.
+//!
+//! Preferred integration: embed [`crate::SagaParticipantSupport`] in your actor
+//! and implement [`crate::HasSagaParticipantSupport`]. This crate will then
+//! provide `SagaStateExt` automatically.
 
-use crate::{ParticipantDedupeStore, ParticipantEvent, ParticipantJournal, SagaId, SagaStateEntry};
+use crate::{
+    HasSagaParticipantSupport, ParticipantDedupeStore, ParticipantEvent, ParticipantJournal,
+    SagaId, SagaStateEntry,
+};
 use std::collections::HashMap;
 
 /// Extension trait providing common saga state management operations.
 ///
 /// This trait defines the core interface for types that manage saga lifecycle
 /// state, including access to state storage, journaling, and deduplication.
-/// Implementors provide access to the underlying storage mechanisms, while
-/// the trait supplies default implementations for common operations.
+/// This trait is only available to types that implement
+/// [`crate::HasSagaParticipantSupport`]. Manual `SagaStateExt` implementations
+/// are intentionally not supported.
 ///
 /// # Implementation Requirements
 ///
@@ -25,55 +32,66 @@ use std::collections::HashMap;
 /// # Example
 ///
 /// ```ignore
-/// struct MyStateManager {
-///     states: HashMap<SagaId, SagaStateEntry>,
-///     journal: InMemoryJournal,
-///     dedupe: InMemoryDedupe,
+/// struct MyActor {
+///     saga: SagaParticipantSupport<InMemoryJournal, InMemoryDedupe>,
 /// }
 ///
-/// impl SagaStateExt for MyStateManager {
+/// impl HasSagaParticipantSupport for MyActor {
 ///     type Journal = InMemoryJournal;
 ///     type Dedupe = InMemoryDedupe;
 ///
-///     fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> {
-///         &mut self.states
+///     fn saga_support(&self) -> &SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+///         &self.saga
 ///     }
-///     // ... implement other required methods
+///
+///     fn saga_support_mut(&mut self) -> &mut SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+///         &mut self.saga
+///     }
 /// }
 /// ```
-pub trait SagaStateExt: Send + 'static {
-    type Journal: ParticipantJournal;
-    type Dedupe: ParticipantDedupeStore;
-
+pub trait SagaStateExt: HasSagaParticipantSupport {
     /// Returns mutable access to the saga state map.
     ///
     /// This provides direct access to the underlying storage for saga state entries,
     /// allowing modifications such as inserting new sagas or updating existing ones.
-    fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry>;
+    fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> {
+        &mut self.saga_support_mut().saga_states
+    }
 
     /// Returns immutable access to the saga state map.
     ///
     /// Use this for read-only operations that need to inspect saga state
     /// without modifying it.
-    fn saga_states_ref(&self) -> &HashMap<SagaId, SagaStateEntry>;
+    fn saga_states_ref(&self) -> &HashMap<SagaId, SagaStateEntry> {
+        &self.saga_support().saga_states
+    }
 
     /// Returns the participant journal for event persistence.
     ///
     /// The journal is used to durably record saga events for recovery
     /// and audit purposes.
-    fn saga_journal(&self) -> &Self::Journal;
+    fn saga_journal(&self) -> &<Self as HasSagaParticipantSupport>::Journal {
+        &self.saga_support().journal
+    }
 
     /// Returns the deduplication store for idempotency tracking.
     ///
     /// The dedupe store tracks which operations have already been processed
     /// to prevent duplicate execution of side effects.
-    fn saga_dedupe(&self) -> &Self::Dedupe;
+    fn saga_dedupe(&self) -> &<Self as HasSagaParticipantSupport>::Dedupe {
+        &self.saga_support().dedupe
+    }
 
     /// Returns the current timestamp in milliseconds.
     ///
     /// This should return a monotonically increasing value suitable for
     /// time-based operations such as timeouts and expiration checks.
-    fn now_millis(&self) -> u64;
+    fn now_millis(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
 
     /// Checks and marks a deduplication key for the given saga.
     ///
@@ -173,5 +191,70 @@ pub trait SagaStateExt: Send + 'static {
             .values()
             .filter(|e| !e.is_terminal())
             .count()
+    }
+}
+
+impl<T> SagaStateExt for T where T: HasSagaParticipantSupport {}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        HasSagaParticipantSupport, InMemoryDedupe, InMemoryJournal, ParticipantEvent,
+        ParticipantJournal, SagaId, SagaParticipantSupport,
+    };
+
+    use super::SagaStateExt;
+
+    struct DummyParticipant {
+        saga: SagaParticipantSupport<InMemoryJournal, InMemoryDedupe>,
+    }
+
+    impl DummyParticipant {
+        fn new() -> Self {
+            Self {
+                saga: SagaParticipantSupport::new(InMemoryJournal::new(), InMemoryDedupe::new()),
+            }
+        }
+    }
+
+    impl HasSagaParticipantSupport for DummyParticipant {
+        type Journal = InMemoryJournal;
+        type Dedupe = InMemoryDedupe;
+
+        fn saga_support(&self) -> &crate::SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+            &self.saga
+        }
+
+        fn saga_support_mut(
+            &mut self,
+        ) -> &mut crate::SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+            &mut self.saga
+        }
+    }
+
+    #[test]
+    fn blanket_impl_routes_state_and_storage_through_embedded_support() {
+        let participant = DummyParticipant::new();
+        let saga_id = SagaId::new(42);
+
+        participant.record_event(
+            saga_id,
+            ParticipantEvent::StepTriggered {
+                triggering_event: "saga_started".into(),
+                triggered_at_millis: 10,
+            },
+        );
+        assert_eq!(
+            participant
+                .saga_journal()
+                .read(saga_id)
+                .expect("journal should read")
+                .len(),
+            1
+        );
+
+        assert!(participant.check_dedupe(saga_id, "step_started"));
+        assert!(!participant.check_dedupe(saga_id, "step_started"));
+        assert_eq!(participant.active_saga_count(), 0);
     }
 }

@@ -194,8 +194,18 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "futures",
+ "icanact-core-derive",
  "rustc-hash",
  "tokio",
+]
+
+[[package]]
+name = "icanact-core-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
