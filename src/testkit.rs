@@ -133,57 +133,37 @@ pub fn drive_scenario<P>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::{
-        CompensationError, DependencySpec, InMemoryDedupe, InMemoryJournal, ParticipantStats,
-        SagaStateEntry, StepError, StepOutput,
+        CompensationError, DependencySpec, HasSagaParticipantSupport, InMemoryDedupe,
+        InMemoryJournal, SagaParticipantSupport, StepError, StepOutput,
     };
 
     use super::*;
 
     struct TestParticipant {
-        states: HashMap<SagaId, SagaStateEntry>,
-        journal: InMemoryJournal,
-        dedupe: InMemoryDedupe,
-        stats: ParticipantStats,
+        saga: SagaParticipantSupport<InMemoryJournal, InMemoryDedupe>,
         called: bool,
     }
 
     impl Default for TestParticipant {
         fn default() -> Self {
             Self {
-                states: HashMap::new(),
-                journal: InMemoryJournal::new(),
-                dedupe: InMemoryDedupe::new(),
-                stats: ParticipantStats::new(),
+                saga: SagaParticipantSupport::new(InMemoryJournal::new(), InMemoryDedupe::new()),
                 called: false,
             }
         }
     }
 
-    impl SagaStateExt for TestParticipant {
+    impl HasSagaParticipantSupport for TestParticipant {
         type Journal = InMemoryJournal;
         type Dedupe = InMemoryDedupe;
 
-        fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> {
-            &mut self.states
+        fn saga_support(&self) -> &SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+            &self.saga
         }
 
-        fn saga_states_ref(&self) -> &HashMap<SagaId, SagaStateEntry> {
-            &self.states
-        }
-
-        fn saga_journal(&self) -> &Self::Journal {
-            &self.journal
-        }
-
-        fn saga_dedupe(&self) -> &Self::Dedupe {
-            &self.dedupe
-        }
-
-        fn now_millis(&self) -> u64 {
-            1_700_000_000_000
+        fn saga_support_mut(&mut self) -> &mut SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+            &mut self.saga
         }
     }
 

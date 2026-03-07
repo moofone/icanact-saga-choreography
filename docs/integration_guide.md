@@ -15,7 +15,6 @@ src/actors/<actor-name>/
 ├── saga/
 │   ├── mod.rs
 │   ├── participant.rs
-│   ├── state_ext.rs
 │   └── types.rs            # optional
 ├── tests/
 │   ├── unit.rs
@@ -26,35 +25,48 @@ src/actors/<actor-name>/
 
 ## Required Actor Fields
 
-Your actor struct must include saga state + storage handles:
+The canonical integration is one embedded saga support field:
 
 ```rust
 pub struct MyActor {
     // business state + dependencies...
-    saga_states: HashMap<SagaId, SagaStateEntry>,
-    saga_journal: Arc<dyn ParticipantJournal>,
-    saga_dedupe: Arc<dyn ParticipantDedupeStore>,
-    saga_stats: Arc<ParticipantStats>,
+    saga: SagaParticipantSupport<MyJournal, MyDedupe>,
 }
 ```
+
+`SagaParticipantSupport` owns:
+
+- saga state storage
+- journal
+- dedupe store
+- participant stats
+- startup recovery events
+- optional local pubsub bus
 
 ## Required Traits
 
 Implement exactly these two traits for each saga participant.
 
-### 1) `SagaStateExt` (infrastructure access)
+### 1) `HasSagaParticipantSupport` (canonical infrastructure access)
 
-Implement all required methods:
+Preferred integration:
 
 ```rust
-impl SagaStateExt for MyActor {
-    fn saga_states(&mut self) -> &mut HashMap<SagaId, SagaStateEntry> { &mut self.saga_states }
-    fn saga_states_ref(&self) -> &HashMap<SagaId, SagaStateEntry> { &self.saga_states }
-    fn saga_journal(&self) -> &Arc<dyn ParticipantJournal> { &self.saga_journal }
-    fn saga_dedupe(&self) -> &Arc<dyn ParticipantDedupeStore> { &self.saga_dedupe }
-    fn now_millis(&self) -> u64 { /* unix millis */ }
+impl HasSagaParticipantSupport for MyActor {
+    type Journal = MyJournal;
+    type Dedupe = MyDedupe;
+
+    fn saga_support(&self) -> &SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+        &self.saga
+    }
+
+    fn saga_support_mut(&mut self) -> &mut SagaParticipantSupport<Self::Journal, Self::Dedupe> {
+        &mut self.saga
+    }
 }
 ```
+
+After that, `SagaStateExt` is provided automatically by the crate.
 
 ### 2) `SagaParticipant` (business behavior)
 
@@ -84,7 +96,7 @@ In `actor.rs` handler:
 ```rust
 SagaEvent { event } => handle_saga_event(self, event),
 RecoverSagas { reply_to } => { let _ = reply_tell(reply_to, recover_sagas(self)); }
-GetSagaStats { reply_to } => { let _ = reply_tell(reply_to, self.saga_stats.snapshot()); }
+GetSagaStats { reply_to } => { let _ = reply_tell(reply_to, self.saga.stats.snapshot()); }
 ```
 
 PubSub conventions:
@@ -98,7 +110,7 @@ PubSub conventions:
 
 Use both stats and tracing.
 
-- Keep `Arc<ParticipantStats>` in actor state and expose `GetSagaStats`.
+- Keep participant stats in `self.saga.stats` and expose `GetSagaStats`.
 - Emit structured `tracing` logs in participant hooks (`on_saga_completed`, `on_saga_failed`, `on_quarantined`) and/or around pubsub boundaries.
 - Include at least: `saga_id`, `saga_type`, `step_name`, `trace_id`, and failure reason.
 - If you need a pluggable telemetry sink, wire a `SagaObserver` implementation (e.g. `TracingObserver`) in your actor runtime path.
@@ -111,9 +123,9 @@ Use both stats and tracing.
 
 ## Minimal Implementation Checklist
 
-1. Create actor folder layout (including `saga/participant.rs` and `saga/state_ext.rs`).
-2. Add required actor fields (`saga_states`, `saga_journal`, `saga_dedupe`, `saga_stats`).
-3. Implement `SagaStateExt` (all methods) and `SagaParticipant` (required methods).
+1. Create actor folder layout (including `saga/participant.rs`).
+2. Add `saga: SagaParticipantSupport<Journal, Dedupe>`.
+3. Implement `HasSagaParticipantSupport` and `SagaParticipant`.
 4. Add `SagaEvent`/`RecoverSagas`/`GetSagaStats` commands.
 5. Route `SagaEvent` to `handle_saga_event(self, event)`.
 6. Subscribe mailbox to `saga:<type>` topic(s), publish `SagaStarted`, and emit choreography events.
