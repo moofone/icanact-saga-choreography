@@ -37,6 +37,8 @@ pub enum SagaChoreographyEvent {
         context: SagaContext,
         /// The output produced by the completed step.
         output: Vec<u8>,
+        /// The original input payload executed by the completed step.
+        saga_input: Vec<u8>,
         /// Whether compensation logic is available for this step if rollback is needed.
         compensation_available: bool,
     },

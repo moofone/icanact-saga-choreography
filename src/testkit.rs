@@ -77,11 +77,13 @@ pub fn saga_started(context: SagaContext, payload: Vec<u8>) -> SagaChoreographyE
 pub fn step_completed(
     context: SagaContext,
     output: Vec<u8>,
+    saga_input: Vec<u8>,
     compensation_available: bool,
 ) -> SagaChoreographyEvent {
     SagaChoreographyEvent::StepCompleted {
         context,
         output,
+        saga_input,
         compensation_available,
     }
 }
