@@ -13,7 +13,7 @@ test-harness = []
 
 [dependencies]
 # Core dependencies
-icanact-core = { version = "0.1.0", path = "../icanact-core", features = ["async-actors"] }
+icanact-core = { git = "ssh://git@github.com/moofone/actor-framework-core.git", branch = "main", features = ["async-actors"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1.3"
 thiserror = "1.0"
