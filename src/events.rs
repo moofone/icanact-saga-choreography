@@ -105,6 +105,34 @@ pub enum SagaChoreographyEvent {
     },
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum SagaTerminalOutcome {
+    Completed { context: SagaContext },
+    Failed { context: SagaContext, reason: Box<str> },
+    StepFailed {
+        context: SagaContext,
+        error: Box<str>,
+        will_retry: bool,
+        requires_compensation: bool,
+    },
+    CompensationFailed {
+        context: SagaContext,
+        error: Box<str>,
+        is_ambiguous: bool,
+    },
+    Quarantined {
+        context: SagaContext,
+        reason: Box<str>,
+        step: Box<str>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SagaDelegatedReply {
+    pub responder: Box<str>,
+    pub outcome: SagaTerminalOutcome,
+}
+
 impl SagaChoreographyEvent {
     /// Returns a reference to the saga context associated with this event.
     ///
@@ -152,6 +180,48 @@ impl SagaChoreographyEvent {
     /// @return A `String` in the format "saga:{saga_type}" used as the pub/sub topic.
     pub fn topic(saga_type: &str) -> String {
         format!("saga:{}", saga_type)
+    }
+
+    pub fn terminal_outcome(&self) -> Option<SagaTerminalOutcome> {
+        match self {
+            Self::SagaCompleted { context } => Some(SagaTerminalOutcome::Completed {
+                context: context.clone(),
+            }),
+            Self::SagaFailed { context, reason } => Some(SagaTerminalOutcome::Failed {
+                context: context.clone(),
+                reason: reason.clone(),
+            }),
+            Self::StepFailed {
+                context,
+                error,
+                will_retry,
+                requires_compensation,
+            } => Some(SagaTerminalOutcome::StepFailed {
+                context: context.clone(),
+                error: error.clone(),
+                will_retry: *will_retry,
+                requires_compensation: *requires_compensation,
+            }),
+            Self::CompensationFailed {
+                context,
+                error,
+                is_ambiguous,
+            } => Some(SagaTerminalOutcome::CompensationFailed {
+                context: context.clone(),
+                error: error.clone(),
+                is_ambiguous: *is_ambiguous,
+            }),
+            Self::SagaQuarantined {
+                context,
+                reason,
+                step,
+            } => Some(SagaTerminalOutcome::Quarantined {
+                context: context.clone(),
+                reason: reason.clone(),
+                step: step.clone(),
+            }),
+            _ => None,
+        }
     }
 }
 
