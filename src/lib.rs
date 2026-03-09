@@ -59,6 +59,7 @@ mod stats;
 
 // === Helpers ===
 mod helpers;
+mod reply_registry;
 mod testkit;
 
 // === Re-exports ===
@@ -75,7 +76,9 @@ pub use state::{
 pub use support::{HasSagaParticipantSupport, SagaParticipantSupport, SagaParticipantSupportExt};
 
 // Events
-pub use events::{AckStatus, ParticipantEvent, SagaChoreographyEvent};
+pub use events::{
+    AckStatus, ParticipantEvent, SagaChoreographyEvent, SagaDelegatedReply, SagaTerminalOutcome,
+};
 
 // Errors
 pub use errors::{CompensationError, StepError, StepOutput};
@@ -96,6 +99,10 @@ pub use stats::{ParticipantStats, ParticipantStatsSnapshot};
 pub use helpers::{
     compensate_wrapper, execute_step_wrapper, handle_saga_event, handle_saga_event_with_emit,
     recover_sagas,
+};
+pub use reply_registry::{
+    SagaDelegatedReplyHandle, SagaDelegatedReplyResult, complete_terminal_reply,
+    complete_terminal_reply_from_event, register_terminal_reply, reject_terminal_reply,
 };
 pub use testkit::{
     compensation_requested, drive_scenario, saga_started, step_completed, step_failed,
