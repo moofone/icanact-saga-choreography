@@ -107,10 +107,7 @@ pub use helpers::{
     handle_async_saga_event_with_emit, handle_saga_event, handle_saga_event_with_emit,
     recover_sagas,
 };
-pub use reply_registry::{
-    complete_terminal_reply, complete_terminal_reply_from_event, register_terminal_reply,
-    reject_terminal_reply, SagaDelegatedReplyHandle, SagaDelegatedReplyResult,
-};
+pub use reply_registry::{SagaDelegatedReplyHandle, SagaDelegatedReplyResult};
 pub use resolver::{
     FailureAuthority, SuccessCriteria, TerminalPolicy, TerminalResolver, TERMINAL_RESOLVER_STEP,
 };
