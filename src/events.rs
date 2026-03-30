@@ -251,14 +251,6 @@ impl SagaChoreographyEvent {
         }
     }
 
-    /// Constructs the pub/sub topic name for a given saga type.
-    ///
-    /// @param saga_type The type identifier for the saga.
-    /// @return A `String` in the format "saga:{saga_type}" used as the pub/sub topic.
-    pub fn topic(saga_type: &str) -> String {
-        format!("saga:{}", saga_type)
-    }
-
     pub fn terminal_outcome(&self) -> Option<SagaTerminalOutcome> {
         match self {
             Self::SagaCompleted { context } => Some(SagaTerminalOutcome::Completed {
@@ -286,6 +278,12 @@ impl SagaChoreographyEvent {
             }),
             _ => None,
         }
+    }
+}
+
+impl icanact_core::local::EventTopic for SagaChoreographyEvent {
+    fn event_topic(&self) -> &str {
+        self.context().saga_type.as_ref()
     }
 }
 
