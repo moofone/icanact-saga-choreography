@@ -13,7 +13,7 @@ pub struct SagaFailureDetails {
     pub at_millis: u64,
 }
 
-/// Events published via DistributedPubSub
+/// Events published via the local saga event bus.
 #[derive(Clone, Debug)]
 pub enum SagaChoreographyEvent {
     /// Emitted when a new SAGA orchestration begins.
