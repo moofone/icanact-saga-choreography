@@ -8,6 +8,12 @@ pub enum SagaParticipantChannel<C> {
     Business(C),
 }
 
+impl<C> From<C> for SagaParticipantChannel<C> {
+    fn from(value: C) -> Self {
+        Self::Business(value)
+    }
+}
+
 pub fn bind_sync_participant_channel<A, C>(
     bus: &SagaChoreographyBus,
     actor_ref: &icanact_core::local_sync::SyncActorRef<A>,

@@ -175,6 +175,12 @@ pub fn handle_saga_event_with_emit<P, F>(
             participant.prune_saga(context.saga_id);
         }
 
+        SagaChoreographyEvent::SagaQuarantined { reason, .. } => {
+            participant.terminal_sagas().insert(context.saga_id);
+            participant.on_quarantined(&context, &reason);
+            participant.prune_saga(context.saga_id);
+        }
+
         _ => {}
     }
 }
@@ -327,6 +333,11 @@ pub async fn handle_async_saga_event_with_emit<P, F>(
         SagaChoreographyEvent::SagaFailed { reason, .. } => {
             participant.terminal_sagas().insert(context.saga_id);
             participant.on_saga_failed(&context, &reason);
+            participant.prune_saga(context.saga_id);
+        }
+        SagaChoreographyEvent::SagaQuarantined { reason, .. } => {
+            participant.terminal_sagas().insert(context.saga_id);
+            participant.on_quarantined(&context, &reason);
             participant.prune_saga(context.saga_id);
         }
         _ => {}
@@ -1449,5 +1460,49 @@ mod tests {
             emitted.get(1),
             Some(SagaChoreographyEvent::SagaQuarantined { .. })
         ));
+    }
+
+    #[test]
+    fn handle_saga_event_latches_and_prunes_on_quarantine() {
+        let mut participant = TestParticipant::default();
+        let started = started_event();
+        let saga_id = started.context().saga_id;
+
+        handle_saga_event_with_emit(&mut participant, started, |_| {});
+        assert_eq!(participant.executed, 1);
+        assert!(participant.saga_states().contains_key(&saga_id));
+
+        handle_saga_event_with_emit(
+            &mut participant,
+            SagaChoreographyEvent::SagaQuarantined {
+                context: DeterministicContextBuilder::default().with_saga_id(saga_id.get()).build(),
+                reason: "panic".into(),
+                step: "risk_check".into(),
+                participant_id: "risk_check".into(),
+            },
+            |_| {},
+        );
+
+        assert!(participant.is_terminal_saga_latched(saga_id));
+        assert!(!participant.saga_states().contains_key(&saga_id));
+
+        handle_saga_event_with_emit(
+            &mut participant,
+            SagaChoreographyEvent::StepCompleted {
+                context: DeterministicContextBuilder::default()
+                    .with_saga_id(saga_id.get())
+                    .with_step_name("positions_check")
+                    .build(),
+                output: vec![1],
+                saga_input: vec![1],
+                compensation_available: false,
+            },
+            |_| {},
+        );
+
+        assert_eq!(
+            participant.executed, 1,
+            "post-quarantine replay should be ignored once the saga is terminal-latched"
+        );
     }
 }
