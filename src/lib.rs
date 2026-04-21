@@ -70,7 +70,8 @@ mod testkit;
 
 // Types
 pub use binding::{
-    bind_async_participant_channel, bind_async_participant_tell, bind_sync_participant_channel,
+    bind_async_participant_channel, bind_async_participant_tell,
+    bind_async_workflow_participant_channel, bind_sync_participant_channel,
     bind_sync_participant_tell, bind_sync_workflow_participant_channel,
     bind_sync_workflow_participant_tell, checked_workflow_saga_types, workflow_saga_types,
     SagaParticipantChannel,

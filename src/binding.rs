@@ -188,6 +188,23 @@ where
         .collect())
 }
 
+pub fn bind_async_workflow_participant_channel<A, C>(
+    bus: &SagaChoreographyBus,
+    actor_ref: &icanact_core::local_async::AsyncActorRef<A>,
+    channel_name: &str,
+    capacity: usize,
+) -> Result<Vec<EventSubscription>, String>
+where
+    A: icanact_core::local_async::AsyncActor + HasSagaWorkflowParticipants + Send + 'static,
+    <A as icanact_core::local_async::AsyncActor>::Channel: Send + 'static,
+    <A as icanact_core::local_async::AsyncActor>::Channel: From<SagaParticipantChannel<C>>,
+    A::Contract: icanact_core::local_async::contract::SupportsTell<A>,
+    C: Send + 'static,
+{
+    let saga_types = checked_workflow_saga_types::<A>()?;
+    bind_async_participant_channel::<A, C>(bus, actor_ref, &saga_types, channel_name, capacity)
+}
+
 pub fn bind_async_participant_tell<A, F>(
     bus: &SagaChoreographyBus,
     actor_ref: &icanact_core::local_async::AsyncActorRef<A>,
