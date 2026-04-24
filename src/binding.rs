@@ -6,6 +6,8 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+// Keep the public channel shape direct so actor channel conversions stay simple.
+#[allow(clippy::large_enum_variant)]
 pub enum SagaParticipantChannel<C> {
     Saga(SagaChoreographyEvent),
     Business(C),
@@ -303,15 +305,15 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        CompensationError, HasSagaWorkflowParticipants, SagaChoreographyBus, SagaChoreographyEvent,
-        SagaContext, SagaId, SagaTerminalOutcome, SagaWorkflowParticipant, StepError, StepOutput,
-        define_saga_workflow_contract,
+        define_saga_workflow_contract, CompensationError, HasSagaWorkflowParticipants,
+        SagaChoreographyBus, SagaChoreographyEvent, SagaContext, SagaId, SagaTerminalOutcome,
+        SagaWorkflowParticipant, StepError, StepOutput,
     };
     use icanact_core::local_sync::{self, SyncActor};
 
     use super::{
-        SagaParticipantChannel, bind_sync_workflow_participant_channel,
-        bind_sync_workflow_participant_channel_strict,
+        bind_sync_workflow_participant_channel, bind_sync_workflow_participant_channel_strict,
+        SagaParticipantChannel,
     };
 
     #[derive(Clone, Debug)]

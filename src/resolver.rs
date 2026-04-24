@@ -13,7 +13,7 @@ pub enum FailureAuthority {
 }
 
 impl FailureAuthority {
-    fn is_authorized(&self, step_name: &str) -> bool {
+    pub(crate) fn is_authorized(&self, step_name: &str) -> bool {
         match self {
             Self::AnyParticipant => true,
             Self::OnlySteps(steps) => steps.contains(step_name),

@@ -3,36 +3,52 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use icanact_core::CorrelationRegistry;
 use icanact_core::local::{EventBus, EventSubscription, PublishStats};
+use icanact_core::CorrelationRegistry;
 
 use crate::reply_registry::{SagaReplyToHandle, SagaReplyToResult};
+use crate::workflow_contract::required_path_steps_from_success_criteria;
 use crate::{
-    HasSagaWorkflowParticipants, SagaChoreographyEvent, SagaId, SagaReplyTo, SagaTerminalOutcome,
-    SagaWorkflowContract, TERMINAL_RESOLVER_STEP, TerminalPolicy, TerminalResolver,
-    required_steps_from_success_criteria, validate_workflow_contract,
+    required_steps_from_success_criteria, validate_workflow_contract, HasSagaWorkflowParticipants,
+    SagaChoreographyEvent, SagaId, SagaReplyTo, SagaTerminalOutcome, SagaWorkflowContract,
+    TerminalPolicy, TerminalResolver, TERMINAL_RESOLVER_STEP,
 };
 
 #[derive(Clone, Debug)]
 struct WorkflowContractState {
     first_step: Box<str>,
     declared_steps: HashSet<Box<str>>,
+    required_path_steps: HashSet<Box<str>>,
 }
+
+type TerminalReplyMap = Arc<Mutex<HashMap<SagaId, SagaReplyTo>>>;
+type TerminalOutcomeMap = Arc<Mutex<HashMap<SagaId, SagaTerminalOutcome>>>;
+type TerminalOrder = Arc<Mutex<VecDeque<SagaId>>>;
+type TerminalPolicyMap = Arc<Mutex<HashMap<Box<str>, Box<str>>>>;
+type WorkflowContractMap = Arc<Mutex<HashMap<Box<str>, WorkflowContractState>>>;
+type BoundStepMap = Arc<Mutex<HashMap<Box<str>, HashSet<Box<str>>>>>;
 
 pub struct SagaChoreographyBus {
     bus: EventBus<SagaChoreographyEvent>,
     pending_replies: CorrelationRegistry<SagaId, SagaReplyToResult>,
-    terminal_replies: Arc<Mutex<HashMap<SagaId, SagaReplyTo>>>,
-    terminal_outcomes: Arc<Mutex<HashMap<SagaId, SagaTerminalOutcome>>>,
-    terminal_order: Arc<Mutex<VecDeque<SagaId>>>,
-    terminal_policies_by_saga_type: Arc<Mutex<HashMap<Box<str>, Box<str>>>>,
-    workflow_contracts_by_saga_type: Arc<Mutex<HashMap<Box<str>, WorkflowContractState>>>,
-    bound_steps_by_saga_type: Arc<Mutex<HashMap<Box<str>, HashSet<Box<str>>>>>,
+    terminal_replies: TerminalReplyMap,
+    terminal_outcomes: TerminalOutcomeMap,
+    terminal_order: TerminalOrder,
+    terminal_policies_by_saga_type: TerminalPolicyMap,
+    workflow_contracts_by_saga_type: WorkflowContractMap,
+    bound_steps_by_saga_type: BoundStepMap,
     owned: bool,
 }
 
 const DEFAULT_TERMINAL_RETENTION_LIMIT: usize = 1024;
 const DEFAULT_TERMINAL_WATCHDOG_TICK_MS: u64 = 100;
+
+fn saturating_u32_from_usize(value: usize) -> u32 {
+    if value > u32::MAX as usize {
+        return u32::MAX;
+    }
+    value as u32
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SagaBusPublishError {
@@ -48,6 +64,15 @@ pub enum SagaBusPublishError {
         saga_type: Box<str>,
         attempted: u32,
         delivered: u32,
+    },
+    RequiredPathDeliveryShortfall {
+        saga_id: SagaId,
+        saga_type: Box<str>,
+        step_name: Box<str>,
+        event_type: &'static str,
+        attempted: u32,
+        delivered: u32,
+        required_min_delivered: u32,
     },
 }
 
@@ -78,8 +103,9 @@ impl SagaChoreographyBus {
     }
 
     pub fn publish(&self, event: SagaChoreographyEvent) -> PublishStats {
-        let mut started_expected_min_delivery: Option<u32> = None;
-        let mut started_context: Option<crate::SagaContext> = None;
+        let event_type = event.event_type();
+        let mut expected_min_delivery: Option<u32> = None;
+        let mut expected_context: Option<crate::SagaContext> = None;
         if let SagaChoreographyEvent::SagaStarted { context, .. } = &event {
             if !self.has_terminal_policy_for_saga_type(context.saga_type.as_ref()) {
                 let terminal = SagaChoreographyEvent::SagaFailed {
@@ -108,23 +134,30 @@ impl SagaChoreographyBus {
                 }
                 return self.bus.publish(terminal);
             }
-            started_expected_min_delivery =
+            expected_min_delivery =
                 self.saga_start_expected_min_delivery(context.saga_type.as_ref());
-            started_context = Some(context.clone());
+            expected_context = Some(context.clone());
+        } else if let Some(required_min_delivery) =
+            self.required_path_expected_min_delivery_for_event(&event)
+        {
+            expected_min_delivery = Some(required_min_delivery);
+            expected_context = Some(event.context().clone());
         }
         if let Some(outcome) = event.terminal_outcome() {
             self.store_terminal_outcome(event.context().saga_id, outcome);
         }
         let stats = self.bus.publish(event);
         if let (Some(required_min_delivery), Some(context)) =
-            (started_expected_min_delivery, started_context)
+            (expected_min_delivery, expected_context)
         {
             if stats.delivered < required_min_delivery {
                 let terminal = SagaChoreographyEvent::SagaFailed {
                     context: context.next_step(TERMINAL_RESOLVER_STEP.into()),
                     reason: format!(
-                        "saga start delivery shortfall: saga_type={} delivered={} attempted={} required_min_delivered={} (declared_steps + terminal_resolver)",
+                        "required_path_delivery_shortfall: saga_type={} event_type={} step={} delivered={} attempted={} required_min_delivered={}",
                         context.saga_type,
+                        event_type,
+                        context.step_name,
                         stats.delivered,
                         stats.attempted,
                         required_min_delivery
@@ -146,6 +179,22 @@ impl SagaChoreographyBus {
         event: SagaChoreographyEvent,
     ) -> Result<PublishStats, SagaBusPublishError> {
         let stats = self.publish(event.clone());
+        if let Some(required_min_delivery) =
+            self.required_path_expected_min_delivery_for_event(&event)
+        {
+            if stats.delivered < required_min_delivery {
+                let context = event.context();
+                return Err(SagaBusPublishError::RequiredPathDeliveryShortfall {
+                    saga_id: context.saga_id,
+                    saga_type: context.saga_type.clone(),
+                    step_name: context.step_name.clone(),
+                    event_type: event.event_type(),
+                    attempted: stats.attempted,
+                    delivered: stats.delivered,
+                    required_min_delivered: required_min_delivery,
+                });
+            }
+        }
         if stats.attempted == stats.delivered {
             return Ok(stats);
         }
@@ -213,9 +262,12 @@ impl SagaChoreographyBus {
         for step in C::steps() {
             declared_steps.insert(step.step_name.into());
         }
+        let required_path_steps =
+            required_path_steps_from_success_criteria(C::steps(), &policy.success_criteria);
         let contract_state = WorkflowContractState {
             first_step: C::first_step().into(),
             declared_steps: declared_steps.clone(),
+            required_path_steps,
         };
 
         {
@@ -537,12 +589,43 @@ impl SagaChoreographyBus {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let contract = contracts.get(saga_type)?;
-        let declared_steps = contract.declared_steps.len();
-        let min_delivery = match declared_steps.saturating_add(1).try_into() {
-            Ok(value) => value,
-            Err(_err) => u32::MAX,
-        };
-        Some(min_delivery)
+        let required_path_steps = contract.required_path_steps.len();
+        Some(saturating_u32_from_usize(
+            required_path_steps.saturating_add(1),
+        ))
+    }
+
+    fn required_path_expected_min_delivery_for_event(
+        &self,
+        event: &SagaChoreographyEvent,
+    ) -> Option<u32> {
+        if matches!(
+            event,
+            SagaChoreographyEvent::SagaCompleted { .. }
+                | SagaChoreographyEvent::SagaFailed { .. }
+                | SagaChoreographyEvent::SagaQuarantined { .. }
+        ) {
+            return None;
+        }
+
+        let context = event.context();
+        if !self.has_terminal_policy_for_saga_type(context.saga_type.as_ref()) {
+            return None;
+        }
+        let contracts = self
+            .workflow_contracts_by_saga_type
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let contract = contracts.get(context.saga_type.as_ref())?;
+        if !contract
+            .required_path_steps
+            .contains(context.step_name.as_ref())
+        {
+            return None;
+        }
+        Some(saturating_u32_from_usize(
+            contract.required_path_steps.len().saturating_add(1),
+        ))
     }
 
     fn store_terminal_reply(&self, saga_id: SagaId, reply: SagaReplyTo) {
@@ -629,8 +712,9 @@ fn spawn_terminal_watchdog_if_needed(
 ) -> Result<(), String> {
     let saga_type = policy.saga_type.clone();
     let watchdog_name = format!("saga-terminal-watchdog:{saga_type}");
-    let spawn_result = thread::Builder::new().name(watchdog_name).spawn(move || {
-        loop {
+    let spawn_result = thread::Builder::new()
+        .name(watchdog_name)
+        .spawn(move || loop {
             thread::sleep(terminal_watchdog_tick_interval());
             let terminal_events = {
                 let mut guard = match resolver.lock() {
@@ -650,8 +734,7 @@ fn spawn_terminal_watchdog_if_needed(
                     );
                 }
             }
-        }
-    });
+        });
     if let Err(err) = spawn_result {
         return Err(format!(
             "terminal watchdog spawn failed saga_type={}: {}",
@@ -703,8 +786,8 @@ impl Default for SagaChoreographyBus {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -713,10 +796,10 @@ mod tests {
     use crate::{
         FailureAuthority, SagaChoreographyEvent, SagaContext, SagaId, SagaReplyToResult,
         SagaTerminalOutcome, SagaWorkflowContract, SagaWorkflowStepContract, SuccessCriteria,
-        TERMINAL_RESOLVER_STEP, TerminalPolicy, WorkflowDependencySpec,
+        TerminalPolicy, WorkflowDependencySpec, TERMINAL_RESOLVER_STEP,
     };
 
-    use super::{DEFAULT_TERMINAL_RETENTION_LIMIT, SagaChoreographyBus};
+    use super::{SagaChoreographyBus, DEFAULT_TERMINAL_RETENTION_LIMIT};
 
     fn context_for(saga_type: &str, step_name: &str, saga_id: u64) -> SagaContext {
         let now = SagaContext::now_millis();
@@ -1261,12 +1344,151 @@ mod tests {
             panic!("expected immediate terminal failure for live delivery shortfall");
         };
         assert!(
-            reason.contains("saga start delivery shortfall"),
+            reason.contains("required_path_delivery_shortfall"),
             "unexpected reason: {reason}"
         );
         assert!(
             reason.contains("required_min_delivered=3"),
             "expected minimum delivery requirement in reason, got: {reason}"
+        );
+    }
+
+    #[test]
+    fn required_path_dependency_delivery_shortfall_fails_immediately() {
+        let bus = SagaChoreographyBus::new();
+        bus.register_workflow_contract_provider::<MultiStepOrderLifecycleContract>()
+            .expect("workflow contract registration should succeed");
+        bus.register_bound_workflow_step("order_lifecycle", "risk_check")
+            .expect("risk_check binding should succeed");
+        bus.register_bound_workflow_step("order_lifecycle", "create_order")
+            .expect("create_order binding should succeed");
+        let _resolver = bus
+            .attach_terminal_resolver_for_contract::<MultiStepOrderLifecycleContract>(
+                "test-resolver",
+            )
+            .expect("terminal resolver should attach");
+        let _risk_sub = bus.subscribe_saga_type_fn("order_lifecycle", |_event| true);
+        let order_sub = bus.subscribe_saga_type_fn("order_lifecycle", |_event| true);
+
+        let saga_id = SagaId::new(90052);
+        let started = SagaChoreographyEvent::SagaStarted {
+            context: context("risk_check", saga_id.get()),
+            payload: Vec::new(),
+        };
+        let _ = bus.publish(started);
+        assert!(
+            bus.take_terminal_outcome(saga_id).is_none(),
+            "initial start should be accepted with resolver and participant route live"
+        );
+
+        assert!(bus.unsubscribe(order_sub));
+        let _ = bus.publish(SagaChoreographyEvent::StepCompleted {
+            context: context("risk_check", saga_id.get()),
+            output: Vec::new(),
+            saga_input: Vec::new(),
+            compensation_available: false,
+        });
+
+        let Some(SagaTerminalOutcome::Failed { reason, .. }) = bus.take_terminal_outcome(saga_id)
+        else {
+            panic!("expected immediate terminal failure for required dependency route loss");
+        };
+        assert!(
+            reason.contains("required_path_delivery_shortfall"),
+            "unexpected reason: {reason}"
+        );
+        assert!(
+            reason.contains("event_type=step_completed"),
+            "expected event type in reason, got: {reason}"
+        );
+        assert!(
+            reason.contains("step=risk_check"),
+            "expected source step in reason, got: {reason}"
+        );
+    }
+
+    #[test]
+    fn publish_strict_reports_required_path_delivery_shortfall() {
+        let bus = SagaChoreographyBus::new();
+        bus.register_workflow_contract_provider::<MultiStepOrderLifecycleContract>()
+            .expect("workflow contract registration should succeed");
+        bus.register_bound_workflow_step("order_lifecycle", "risk_check")
+            .expect("risk_check binding should succeed");
+        bus.register_bound_workflow_step("order_lifecycle", "create_order")
+            .expect("create_order binding should succeed");
+        let _resolver = bus
+            .attach_terminal_resolver_for_contract::<MultiStepOrderLifecycleContract>(
+                "test-resolver",
+            )
+            .expect("terminal resolver should attach");
+
+        let err = bus
+            .publish_strict(SagaChoreographyEvent::StepCompleted {
+                context: context("risk_check", 90053),
+                output: Vec::new(),
+                saga_input: Vec::new(),
+                compensation_available: false,
+            })
+            .expect_err("strict publish should report required path shortfall");
+        assert!(matches!(
+            err,
+            super::SagaBusPublishError::RequiredPathDeliveryShortfall {
+                step_name,
+                event_type: "step_completed",
+                required_min_delivered: 3,
+                ..
+            } if step_name.as_ref() == "risk_check"
+        ));
+    }
+
+    struct DeniedRequiredStepContract;
+
+    impl SagaWorkflowContract for DeniedRequiredStepContract {
+        fn saga_type() -> &'static str {
+            "order_lifecycle"
+        }
+
+        fn first_step() -> &'static str {
+            "create_order"
+        }
+
+        fn steps() -> &'static [SagaWorkflowStepContract] {
+            &[SagaWorkflowStepContract {
+                step_name: "create_order",
+                participant_id: "order-manager",
+                depends_on: WorkflowDependencySpec::OnSagaStart,
+            }]
+        }
+
+        fn terminal_policy() -> TerminalPolicy {
+            let mut denied = HashSet::new();
+            denied.insert("create_order".into());
+            let mut required_steps = HashSet::new();
+            required_steps.insert("create_order".into());
+            TerminalPolicy {
+                saga_type: "order_lifecycle".into(),
+                policy_id: "order_lifecycle/denied-required".into(),
+                failure_authority: FailureAuthority::DenySteps(denied),
+                success_criteria: SuccessCriteria::AllOf(required_steps),
+                overall_timeout: Duration::from_secs(30),
+                stalled_timeout: Duration::from_secs(30),
+            }
+        }
+    }
+
+    #[test]
+    fn workflow_contract_rejects_terminal_required_step_without_failure_authority() {
+        let bus = SagaChoreographyBus::new();
+        let err = bus
+            .register_workflow_contract_provider::<DeniedRequiredStepContract>()
+            .expect_err("required terminal step denied failure authority must be rejected");
+        assert!(
+            err.contains("terminal required step lacks failure authority"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("required_step=create_order"),
+            "unexpected error: {err}"
         );
     }
 

@@ -101,9 +101,13 @@ async fn async_ingress_executes_on_saga_start_and_emits_step_completed() {
     .await;
 
     assert_eq!(participant.executed_inputs, vec![vec![7, 8, 9]]);
-    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted.len(), 2);
     assert!(matches!(
         emitted.first(),
+        Some(SagaChoreographyEvent::StepStarted { .. })
+    ));
+    assert!(matches!(
+        emitted.get(1),
         Some(SagaChoreographyEvent::StepCompleted { .. })
     ));
     assert!(matches!(
@@ -152,7 +156,11 @@ async fn async_ingress_waits_for_all_dependencies_before_execution() {
     .await;
 
     assert_eq!(participant.executed_inputs, vec![b"origin".to_vec()]);
-    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted.len(), 2);
+    assert!(matches!(
+        emitted.first(),
+        Some(SagaChoreographyEvent::StepStarted { .. })
+    ));
 }
 
 #[tokio::test]

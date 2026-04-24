@@ -161,7 +161,7 @@ fn ingress_applies_side_effects_and_publishes_valid_emitted_events() {
 
     assert_eq!(terminal_side_effect_calls, 1);
     assert_eq!(invalid_transition_calls, 0);
-    assert_eq!(emitted_transition_calls, 1);
+    assert_eq!(emitted_transition_calls, 2);
     assert_eq!(DELIVERED_STEP_COMPLETED.load(Ordering::Relaxed), 1);
     assert!(matches!(
         participant.saga_states_ref().get(&SagaId::new(10)),
@@ -205,7 +205,7 @@ fn ingress_suppresses_invalid_emitted_transition_when_state_is_missing() {
     );
 
     assert_eq!(invalid_transition_calls, 1);
-    assert_eq!(emitted_transition_calls, 0);
+    assert_eq!(emitted_transition_calls, 1);
     assert_eq!(DELIVERED_STEP_COMPLETED.load(Ordering::Relaxed), 0);
     assert!(participant
         .saga_states_ref()

@@ -115,9 +115,7 @@ pub use observer::{NoOpObserver, SagaObserver, TracingObserver};
 pub use stats::{ParticipantStats, ParticipantStatsSnapshot};
 
 // Helpers
-pub use helpers::{
-    handle_async_saga_event_with_emit, handle_saga_event_with_emit,
-};
+pub use helpers::{handle_async_saga_event_with_emit, handle_saga_event_with_emit};
 pub use reply_registry::{SagaReplyToHandle, SagaReplyToResult};
 pub use resolver::{
     FailureAuthority, SuccessCriteria, TerminalPolicy, TerminalResolver, TERMINAL_RESOLVER_STEP,
