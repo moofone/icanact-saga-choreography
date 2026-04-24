@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    AsyncSagaParticipant, DedupeError, HasSagaParticipantSupport, HasSagaWorkflowParticipants,
-    JournalEntry, JournalError, ParticipantDedupeStore, ParticipantEvent, ParticipantJournal,
+    handle_async_saga_event_with_emit, handle_saga_event_with_emit, AsyncSagaParticipant,
+    DedupeError, HasSagaParticipantSupport, HasSagaWorkflowParticipants, JournalEntry,
+    JournalError, ParticipantDedupeStore, ParticipantEvent, ParticipantJournal,
     SagaChoreographyEvent, SagaContext, SagaId, SagaParticipant, SagaParticipantSupport,
-    SagaStateEntry, SagaStateExt, SagaWorkflowParticipant, handle_async_saga_event_with_emit,
-    handle_saga_event_with_emit,
+    SagaStateEntry, SagaStateExt, SagaWorkflowParticipant,
 };
 
 pub const PANIC_QUARANTINE_REASON_PREFIX: &str = "panic_during_active_";
@@ -486,6 +486,10 @@ fn execute_workflow_step_with_emit<A, F>(
     actor
         .saga_states()
         .insert(saga_id, SagaStateEntry::Executing(state));
+
+    emit(SagaChoreographyEvent::StepStarted {
+        context: context.next_step(workflow.step_name().into()),
+    });
 
     match workflow.execute_step(actor, &context, &input) {
         Ok(output) => complete_workflow_step(actor, workflow, &context, input, output, now, emit),
@@ -1128,7 +1132,7 @@ pub mod lmdb {
     use heed::types::{Bytes, Str};
     use heed::{Database, Env, EnvOpenOptions};
 
-    use super::{DEFAULT_RECOVERY_SAGA_TYPE, collect_startup_recovery_events_for_saga_type};
+    use super::{collect_startup_recovery_events_for_saga_type, DEFAULT_RECOVERY_SAGA_TYPE};
     use crate::{
         DedupeError, JournalEntry, JournalError, ParticipantDedupeStore, ParticipantEvent,
         ParticipantJournal, SagaId, SagaParticipantSupport,
@@ -1440,8 +1444,8 @@ pub mod lmdb {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveSagaExecution, HasActiveSagaExecution, apply_sync_workflow_participant_saga_ingress,
-        default_runtime_dir, workflow_for_event,
+        apply_sync_workflow_participant_saga_ingress, default_runtime_dir, workflow_for_event,
+        ActiveSagaExecution, HasActiveSagaExecution,
     };
     use crate::{
         DependencySpec, DeterministicContextBuilder, HasSagaParticipantSupport,

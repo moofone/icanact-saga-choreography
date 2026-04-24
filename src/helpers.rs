@@ -398,6 +398,10 @@ fn execute_step_wrapper_with_emit<P, F>(
         .saga_states()
         .insert(saga_id, SagaStateEntry::Executing(state));
 
+    emit(SagaChoreographyEvent::StepStarted {
+        context: context.next_step(participant.step_name().into()),
+    });
+
     // Execute
     match participant.execute_step(&context, &input) {
         Ok(output) => {
@@ -444,6 +448,10 @@ async fn execute_step_wrapper_with_emit_async<P, F>(
     participant
         .saga_states()
         .insert(saga_id, SagaStateEntry::Executing(state));
+
+    emit(SagaChoreographyEvent::StepStarted {
+        context: context.next_step(participant.step_name().into()),
+    });
 
     match participant.execute_step(&context, &input).await {
         Ok(output) => complete_step_async(participant, &context, input, output, now, emit),
@@ -1007,9 +1015,13 @@ mod tests {
         });
 
         assert_eq!(participant.executed, 1);
-        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted.len(), 2);
         assert!(matches!(
             emitted.first(),
+            Some(SagaChoreographyEvent::StepStarted { .. })
+        ));
+        assert!(matches!(
+            emitted.get(1),
             Some(SagaChoreographyEvent::StepCompleted {
                 compensation_available: true,
                 ..
@@ -1030,9 +1042,13 @@ mod tests {
         });
 
         assert_eq!(participant.executed, 1);
-        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted.len(), 2);
         assert!(matches!(
             emitted.first(),
+            Some(SagaChoreographyEvent::StepStarted { .. })
+        ));
+        assert!(matches!(
+            emitted.get(1),
             Some(SagaChoreographyEvent::StepFailed {
                 requires_compensation: false,
                 ..
@@ -1050,7 +1066,7 @@ mod tests {
         handle_saga_event_with_emit(&mut participant, input, |event| emitted.push(event));
 
         assert_eq!(participant.executed, 1);
-        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted.len(), 2);
     }
 
     #[test]
@@ -1072,7 +1088,7 @@ mod tests {
         handle_saga_event_with_emit(&mut participant, second, |event| emitted.push(event));
 
         assert_eq!(participant.executed, 2);
-        assert_eq!(emitted.len(), 2);
+        assert_eq!(emitted.len(), 4);
     }
 
     #[test]

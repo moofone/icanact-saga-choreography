@@ -111,6 +111,15 @@ pub fn validate_workflow_contract(
                 saga_type, required_step
             ));
         }
+        if !policy
+            .failure_authority
+            .is_authorized(required_step.as_ref())
+        {
+            return Err(format!(
+                "workflow contract terminal required step lacks failure authority: saga_type={} required_step={}",
+                saga_type, required_step
+            ));
+        }
     }
 
     detect_dependency_cycle(saga_type, &by_step)?;
@@ -118,13 +127,42 @@ pub fn validate_workflow_contract(
     Ok(())
 }
 
-fn dependency_steps(depends_on: WorkflowDependencySpec) -> Vec<&'static str> {
+pub(crate) fn dependency_steps(depends_on: WorkflowDependencySpec) -> Vec<&'static str> {
     match depends_on {
         WorkflowDependencySpec::OnSagaStart => Vec::new(),
         WorkflowDependencySpec::After(step) => vec![step],
         WorkflowDependencySpec::AnyOf(steps) | WorkflowDependencySpec::AllOf(steps) => {
             steps.to_vec()
         }
+    }
+}
+
+pub(crate) fn required_path_steps_from_success_criteria(
+    steps: &[SagaWorkflowStepContract],
+    criteria: &SuccessCriteria,
+) -> HashSet<Box<str>> {
+    let by_step: HashMap<&'static str, &SagaWorkflowStepContract> =
+        steps.iter().map(|step| (step.step_name, step)).collect();
+    let mut required_path = HashSet::new();
+    for step in required_steps_from_success_criteria(criteria) {
+        collect_required_path_step(step.as_ref(), &by_step, &mut required_path);
+    }
+    required_path
+}
+
+fn collect_required_path_step(
+    step_name: &str,
+    by_step: &HashMap<&'static str, &SagaWorkflowStepContract>,
+    required_path: &mut HashSet<Box<str>>,
+) {
+    if !required_path.insert(step_name.to_string().into_boxed_str()) {
+        return;
+    }
+    let Some(step) = by_step.get(step_name) else {
+        return;
+    };
+    for dependency in dependency_steps(step.depends_on) {
+        collect_required_path_step(dependency, by_step, required_path);
     }
 }
 
